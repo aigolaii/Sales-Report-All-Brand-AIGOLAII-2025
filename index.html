@@ -1,0 +1,273 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Sales Cabang AIGOLAII</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    input, select, button { margin: 5px; padding: 5px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    canvas { max-width: 100%; margin-top: 30px; }
+    .filter-bar { margin-top: 20px; }
+    h2, h3 { margin-top: 40px; }
+    .edit-btn, .delete-btn { cursor: pointer; margin: 0 4px; }
+  </style>
+</head>
+<body>
+  <h2>📊 Sales Cabang AIGOLAII</h2>
+
+  <div id="adminForm" style="display:none;">
+    <input type="date" id="tanggal">
+    <select id="cabang"></select>
+    <select id="produk"></select>
+    <input type="number" id="jumlah" placeholder="Jumlah">
+    <button id="tombolInput" onclick="tambahData()">Tambah Data</button>
+  </div>
+
+  <div class="filter-bar">
+    <label>Filter Cabang:</label>
+    <select id="filterCabang" onchange="tampilkanData()">
+      <option value="">Semua</option>
+      <option value="Bekasi 1">Bekasi 1</option>
+      <option value="Bekasi 2">Bekasi 2</option>
+      <option value="Bekasi 3">Bekasi 3</option>
+      <option value="Bintaro">Bintaro</option>
+      <option value="BSD">BSD</option>
+      <option value="Cawang">Cawang</option>
+      <option value="Cengkareng">Cengkareng</option>
+      <option value="Garut">Garut</option>
+      <option value="Jogja">Jogja</option>
+      <option value="Padang">Padang</option>
+      <option value="Pondok Gede">Pondok Gede</option>
+      <option value="Sibolga">Sibolga</option>
+      <option value="Cikarang">Cikarang</option>
+      <option value="Cileungsi">Cileungsi</option>
+      <option value="Jaksel">Jaksel</option>
+      <option value="Tele HO">Tele HO</option>
+    </select>
+
+    <label>Filter Bulan:</label>
+    <input type="month" id="filterBulan" onchange="tampilkanData()">
+    <button onclick="downloadExcel()">⬇ Export Excel</button>
+  </div>
+
+  <table id="tabelData">
+    <thead>
+      <tr>
+        <th>Tanggal</th>
+        <th>Cabang</th>
+        <th>Produk</th>
+        <th>Jumlah</th>
+        <th>Aksi</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <canvas id="grafik" height="100"></canvas>
+
+  <h3>🏆 Peringkat Pencapaian Target</h3>
+  <table id="tabelRingkasan">
+    <thead>
+      <tr>
+        <th>Ranking</th>
+        <th>Cabang</th>
+        <th>Total</th>
+        <th>Target</th>
+        <th>Pencapaian (%)</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    let data = JSON.parse(localStorage.getItem("penjualan")) || [];
+    let isAdmin = false;
+    let modeEdit = false;
+    let indexEdit = null;
+
+    const targetPerCabang = {
+      "Bekasi 1": 55, "Bekasi 2": 55, "Bekasi 3": 55,
+      "Bintaro": 55, "BSD": 55, "Cawang": 55,
+      "Cengkareng": 55, "Garut": 55, "Jogja": 55,
+      "Padang": 55, "Pondok Gede": 55, "Sibolga": 55,
+      "Cikarang": 55, "Cileungsi": 55, "Jaksel": 55,
+      "Tele HO": 55
+    };
+
+    function tampilkanData() {
+      const tbody = document.querySelector("#tabelData tbody");
+      tbody.innerHTML = "";
+
+      const filterCabang = document.getElementById("filterCabang").value;
+      const filterBulan = document.getElementById("filterBulan").value;
+
+      const filtered = data.map((d, i) => ({ ...d, index: i })).filter(d => {
+        return (!filterCabang || d.cabang === filterCabang) &&
+               (!filterBulan || d.tanggal.startsWith(filterBulan));
+      });
+
+      filtered.forEach(d => {
+        const aksi = isAdmin
+          ? `<button class="edit-btn" onclick="editData(${d.index})">✏️</button>
+             <button class="delete-btn" onclick="hapusData(${d.index})">🗑️</button>`
+          : '';
+        const row = `<tr>
+          <td>${d.tanggal}</td>
+          <td>${d.cabang}</td>
+          <td>${d.produk}</td>
+          <td>${d.jumlah}</td>
+          <td>${aksi}</td>
+        </tr>`;
+        tbody.innerHTML += row;
+      });
+
+      updateChart(filtered);
+      tampilkanRingkasan(filtered);
+    }
+
+    function editData(index) {
+      const d = data[index];
+      document.getElementById("tanggal").value = d.tanggal;
+      document.getElementById("cabang").value = d.cabang;
+      document.getElementById("produk").value = d.produk;
+      document.getElementById("jumlah").value = d.jumlah;
+      modeEdit = true;
+      indexEdit = index;
+      document.getElementById("tombolInput").textContent = "Update Data";
+    }
+
+    function hapusData(index) {
+      if (confirm("Yakin ingin menghapus data ini?")) {
+        data.splice(index, 1);
+        localStorage.setItem("penjualan", JSON.stringify(data));
+        tampilkanData();
+      }
+    }
+
+    function tambahData() {
+      const tanggal = document.getElementById("tanggal").value;
+      const cabang = document.getElementById("cabang").value;
+      const produk = document.getElementById("produk").value;
+      const jumlah = parseInt(document.getElementById("jumlah").value);
+
+      if (!tanggal || !cabang || !produk || isNaN(jumlah)) {
+        alert("Mohon lengkapi semua data");
+        return;
+      }
+
+      if (modeEdit && indexEdit !== null) {
+        data[indexEdit] = { tanggal, cabang, produk, jumlah };
+        alert("✅ Data berhasil diperbarui!");
+        modeEdit = false;
+        indexEdit = null;
+        document.getElementById("tombolInput").textContent = "Tambah Data";
+      } else {
+        data.push({ tanggal, cabang, produk, jumlah });
+        alert("✅ Data berhasil ditambahkan!");
+      }
+
+      localStorage.setItem("penjualan", JSON.stringify(data));
+      tampilkanData();
+
+      document.getElementById("tanggal").value = "";
+      document.getElementById("cabang").value = "";
+      document.getElementById("produk").value = "";
+      document.getElementById("jumlah").value = "";
+    }
+
+    function downloadExcel() {
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Penjualan");
+      XLSX.writeFile(wb, "data_penjualan.xlsx");
+    }
+
+    document.addEventListener("keydown", function(e) {
+      if (e.ctrlKey && e.shiftKey && e.key === "A") {
+        const password = prompt("Masukkan password admin:");
+        if (password === "aigolasecret") {
+          isAdmin = true;
+          document.getElementById("adminForm").style.display = "block";
+          tampilkanData();
+          alert("✅ Mode Admin Aktif");
+        } else {
+          alert("❌ Password Salah!");
+        }
+      }
+    });
+
+    function updateChart(filteredData) {
+      const totals = {};
+      filteredData.forEach(d => {
+        totals[d.cabang] = (totals[d.cabang] || 0) + d.jumlah;
+      });
+
+      const labels = Object.keys(totals);
+      const values = Object.values(totals);
+
+      if (window.barChart) window.barChart.destroy();
+      const ctx = document.getElementById("grafik").getContext("2d");
+      window.barChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: labels,
+          datasets: [{
+            label: "Total Penjualan",
+            data: values,
+            backgroundColor: "rgba(54, 162, 235, 0.6)"
+          }]
+        }
+      });
+    }
+
+    function tampilkanRingkasan(filteredData) {
+      const ringkasan = {};
+      filteredData.forEach(d => {
+        ringkasan[d.cabang] = (ringkasan[d.cabang] || 0) + d.jumlah;
+      });
+
+      const hasil = Object.entries(ringkasan).map(([cabang, total]) => {
+        const target = targetPerCabang[cabang] || 0;
+        const persen = target ? ((total / target) * 100).toFixed(1) : 0;
+        return { cabang, total, target, persen: parseFloat(persen) };
+      });
+
+      hasil.sort((a, b) => b.persen - a.persen);
+
+      const tbody = document.querySelector("#tabelRingkasan tbody");
+      tbody.innerHTML = "";
+      hasil.forEach((item, index) => {
+        const row = `<tr>
+          <td>${index + 1}</td>
+          <td>${item.cabang}</td>
+          <td>${item.total}</td>
+          <td>${item.target}</td>
+          <td>${item.persen}%</td>
+        </tr>`;
+        tbody.innerHTML += row;
+      });
+    }
+
+    const cabangs = Object.keys(targetPerCabang);
+    const produkList = ["KKB Mobil", "KSM Motor", "Multiguna"];
+    cabangs.forEach(c => {
+      const opt = document.createElement("option");
+      opt.value = opt.textContent = c;
+      document.getElementById("cabang").appendChild(opt);
+    });
+    produkList.forEach(p => {
+      const opt = document.createElement("option");
+      opt.value = opt.textContent = p;
+      document.getElementById("produk").appendChild(opt);
+    });
+
+    tampilkanData();
+  </script>
+</body>
+</html>
